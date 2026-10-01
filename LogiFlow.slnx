@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/Solution Items/">
+    <File Path=".gitignore" />
+  </Folder>
+  <Project Path="LogiFlow.API/LogiFlow.API.csproj" />
+  <Project Path="LogiFlow.Domain/LogiFlow.Domain.csproj" />
+  <Project Path="LogiFlow.Infrastructure/LogiFlow.Infrastructure.csproj" />
+</Solution>
