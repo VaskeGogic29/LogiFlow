@@ -35,6 +35,8 @@ namespace LogiFlow.Domain.Entities.Sales
         {
             if (string.IsNullOrWhiteSpace(naziv))
                 throw new DomainException("Naziv klijenta je obavezan.");
+            if (!Enum.IsDefined(tip))
+                throw new DomainException("Nepoznat tip klijenta.");
 
             pib = pib?.Trim();
             maticniBroj = maticniBroj?.Trim();
