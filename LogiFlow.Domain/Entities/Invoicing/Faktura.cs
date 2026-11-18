@@ -11,6 +11,7 @@ namespace LogiFlow.Domain.Entities.Invoicing
         public const string PodrazumevanaValuta = "RSD";
 
         private readonly List<StavkaFakture> _stavke = [];
+        private readonly List<PristupniTokenFakture> _pristupniTokeni = [];
 
         public string BrojFakture { get; private set; } = null!;     // npr. IF26-000456
 
@@ -42,6 +43,7 @@ namespace LogiFlow.Domain.Entities.Invoicing
         public string? PdfHash { get; private set; }                  // SHA-256, dokaz integriteta
 
         public IReadOnlyCollection<StavkaFakture> Stavke => _stavke;
+        public IReadOnlyCollection<PristupniTokenFakture> PristupniTokeni => _pristupniTokeni;
 
         // Ne cuva se u bazi
         public string PoslednjeTriCifre => BrojFakture[^3..];
@@ -101,6 +103,19 @@ namespace LogiFlow.Domain.Entities.Invoicing
             PdfHash = hash;
         }
 
+        public PristupniTokenFakture IzdajQrToken(string tokenHash, DateTime isticeU, DateTime sada)
+        {
+            if (Status != StatusFakture.Izdata)
+                throw new DomainException("QR token se izdaje samo za važeću fakturu.");
+
+            foreach (var stari in _pristupniTokeni.Where(t => t.JeVazeci(sada)))
+                stari.Opozovi(sada);
+
+            var token = new PristupniTokenFakture(this, tokenHash, NamenaTokena.QrNalepnica, isticeU, sada);
+            _pristupniTokeni.Add(token);
+            return token;
+        }
+
         public void Storniraj(string razlog, DateTime sada)
         {
             if (Status != StatusFakture.Izdata)
@@ -111,6 +126,9 @@ namespace LogiFlow.Domain.Entities.Invoicing
             Status = StatusFakture.Stornirana;
             RazlogStorniranja = razlog.Trim();
             DatumStorniranja = sada;
+
+            foreach (var token in _pristupniTokeni.Where(t => t.OpozvanU is null))
+                token.Opozovi(sada);//opoziva sve pristupne QR tokene za storniranu fakturu
         }
 
     }
