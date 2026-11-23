@@ -1,5 +1,6 @@
 ﻿using LogiFlow.Domain.Entities.Common;
 using LogiFlow.Domain.Entities.Invoicing;
+using LogiFlow.Domain.Entities.Packing;
 using LogiFlow.Domain.Enums;
 using LogiFlow.Domain.Exceptions;
 
@@ -32,6 +33,20 @@ namespace LogiFlow.Domain.Entities.Transport
 
         public IReadOnlyCollection<Isporuka> Isporuke => _isporuke;
 
+        public int UkupnoPaketa =>
+            _isporuke.Where(i => i.Status != StatusIsporuke.Otkazana).Sum(i => i.BrojPaketa);
+
+        public decimal? UkupnaTezinaKg
+        {
+            get
+            {
+                var aktivne = _isporuke.Where(i => i.Status != StatusIsporuke.Otkazana).ToList();
+                return aktivne.Any(i => i.UkupnaTezinaKg is null)
+                    ? null
+                    : aktivne.Sum(i => i.UkupnaTezinaKg!.Value);
+            }
+        }
+
         private Tura() { } // za EF Core
 
         public Tura(string oznaka, Vozac vozac, DateOnly datum, DateTime planiraniPocetak)
@@ -50,7 +65,7 @@ namespace LogiFlow.Domain.Entities.Transport
 
         // ---------- Planiranje ----------
 
-        public Isporuka DodajIsporuku(Faktura faktura, int brojPokusaja)
+        public Isporuka DodajIsporuku(Faktura faktura, IReadOnlyCollection<Paket> paketiFakture, int brojPokusaja)
         {
             ProveriStatus("dodavanje isporuke", StatusTure.Planirana);
             if (faktura.Status != StatusFakture.Izdata)
@@ -62,7 +77,18 @@ namespace LogiFlow.Domain.Entities.Transport
             if (_isporuke.Any(i => i.Faktura == faktura || (faktura.Id != 0 && i.FakturaId == faktura.Id)))
                 throw new DomainException("Faktura je već u ovoj turi.");
 
-            var isporuka = new Isporuka(this, faktura, adresa, _isporuke.Count + 1, brojPokusaja);
+            var paketi = paketiFakture.Where(p => p.Status != StatusPaketa.Otkazan).ToList();
+
+            if (paketi.Count == 0)
+                throw new DomainException("Faktura nema pakete za isporuku.");
+            if (paketi.Any(p => p.FakturaId != faktura.Id))
+                throw new DomainException("Svi paketi moraju pripadati ovoj fakturi.");
+            if (paketi.Any(p => p.UkupnoPaketa != paketi.Count))
+                throw new DomainException("Moraju se predati svi paketi fakture.");
+            if (paketi.Any(p => p.Status is not (StatusPaketa.SpremanZaTransport or StatusPaketa.VracenUMagacin)))
+                throw new DomainException("Svi paketi moraju biti spremni za transport.");
+
+            var isporuka = new Isporuka(this, faktura, adresa, paketi, _isporuke.Count + 1, brojPokusaja);
             _isporuke.Add(isporuka);
             return isporuka;
         }
@@ -70,7 +96,11 @@ namespace LogiFlow.Domain.Entities.Transport
         public void UkloniIsporuku(int isporukaId)
         {
             ProveriStatus("uklanjanje isporuke", StatusTure.Planirana);
-            _isporuke.Remove(NadjiIsporuku(isporukaId));
+            //_isporuke.Remove(NadjiIsporuku(isporukaId));
+            //prosireno resenje koje oslobadja pakete
+            var isporuka = NadjiIsporuku(isporukaId);
+            isporuka.OslobodiPakete();
+            _isporuke.Remove(isporuka);
 
             var redni = 1;
             foreach (var i in _isporuke.OrderBy(x => x.RedniBrojUTuri))
@@ -139,6 +169,18 @@ namespace LogiFlow.Domain.Entities.Transport
 
             ProveriStatus("potvrda isporuke", StatusTure.UToku);
             isporuka.Potvrdi(imePrimaoca, napomena, sada);
+            return true;
+        }
+
+        //isto idempotentno
+        public bool OznaciNeuspesnuIsporuku(int isporukaId, RazlogNeuspehaIsporuke razlog, string? napomena, DateTime sada)
+        {
+            var isporuka = NadjiIsporuku(isporukaId);
+            if (isporuka.Status == StatusIsporuke.Neuspesna)
+                return false;
+
+            ProveriStatus("evidentiranje neuspešne isporuke", StatusTure.UToku);
+            isporuka.OznaciNeuspesnu(razlog, napomena, sada);
             return true;
         }
 

@@ -1,7 +1,9 @@
 ﻿using LogiFlow.Domain.Entities.Common;
 using LogiFlow.Domain.Entities.Invoicing;
+using LogiFlow.Domain.Entities.Transport;
 using LogiFlow.Domain.Enums;
 using LogiFlow.Domain.Exceptions;
+
 
 namespace LogiFlow.Domain.Entities.Packing
 {
@@ -20,6 +22,9 @@ namespace LogiFlow.Domain.Entities.Packing
         public int SpakovaoKorisnikId { get; private set; }
         public DateTime? DatumPotvrdeSadrzaja { get; private set; }
         public string? KodPaketa { get; private set; }       // npr. P-2026-000456-02, po zavrsetku
+
+        public int? IsporukaId { get; private set; }         // trenutna (poslednja) isporuka
+        public Isporuka? Isporuka { get; private set; }
 
         public byte[] RowVersion { get; private set; } = [];
 
@@ -134,6 +139,35 @@ namespace LogiFlow.Domain.Entities.Packing
                 aktivni[i].Zakljucaj(i + 1, ukupno, faktura.BrojFakture);
         }
 
+
+        // ---------- Transport (pozivaju Tura/Isporuka, zato internal) ----------
+
+        internal void DodeliIsporuci(Isporuka isporuka)
+        {
+            PromeniStatus(StatusPaketa.DodeljenTuri, StatusPaketa.SpremanZaTransport, StatusPaketa.VracenUMagacin);
+            Isporuka = isporuka;
+            IsporukaId = isporuka.Id;
+        }
+
+        internal void OslobodiIzIsporuke()
+        {
+            PromeniStatus(StatusPaketa.SpremanZaTransport, StatusPaketa.DodeljenTuri);
+            Isporuka = null;
+            IsporukaId = null;
+        }
+
+        internal void UtovariUVozilo() =>
+            PromeniStatus(StatusPaketa.UVozilu, StatusPaketa.DodeljenTuri);
+
+        internal void OznaciIsporucen() =>
+            PromeniStatus(StatusPaketa.Isporucen, StatusPaketa.UVozilu);
+
+        internal void OznaciNijeIsporucen() =>
+            PromeniStatus(StatusPaketa.NijeIsporucen, StatusPaketa.UVozilu);
+
+        public void VratiUMagacin() =>      // operativac primi neisporucen paket nazad, namerno public
+            PromeniStatus(StatusPaketa.VracenUMagacin, StatusPaketa.NijeIsporucen);
+
         // ---------- Pomocne ----------
 
         private void Zakljucaj(int redniBroj, int ukupnoPaketa, string brojFakture)
@@ -152,5 +186,12 @@ namespace LogiFlow.Domain.Entities.Packing
 
         private StavkaPaketa? NadjiStavku(StavkaFakture stavka) =>
             _stavke.FirstOrDefault(s => s.StavkaFakture == stavka || (stavka.Id != 0 && s.StavkaFaktureId == stavka.Id));
+
+        private void PromeniStatus(StatusPaketa novi, params StatusPaketa[] dozvoljeniIz)
+        {
+            if (!dozvoljeniIz.Contains(Status))
+                throw new InvalidStatusTransitionException(nameof(Paket), Status, novi);
+            Status = novi;
+        }
     }
 }
